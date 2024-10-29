@@ -1,6 +1,6 @@
 .{
     .name = "openssl-zig",
-    .version = "0.0.0",
+    .version = "3.4.0",
     .dependencies = .{
         .openssl = .{
             .url = "https://github.com/openssl/openssl/releases/download/openssl-3.4.0/openssl-3.4.0.tar.gz",
@@ -10,6 +10,5 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "src",
     },
 }
