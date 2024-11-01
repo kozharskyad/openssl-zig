@@ -9,76 +9,111 @@ fn setupExternalRun(run: *Build.Step.Run, cwd: LazyPath) void {
     run.setEnvironmentVariable("CXX", "zig c++");
 }
 
-fn buildOpenSSL(b: *Build, openssl: *Build.Dependency, dependant: *Build.Step) void {
+fn buildOpenSSL(b: *Build) LazyPath {
+    const cwd = fs.cwd();
+    const prefix_cache_path = b.cache_root.join(b.allocator, &.{"openssl"}) catch @panic("join path error");
+    const prefix_cache = LazyPath{
+        .cwd_relative = prefix_cache_path,
+    };
+
+    const include_path = prefix_cache.path(b, "include").getPath(b);
+    const libs = prefix_cache.path(b, "lib");
+    const lib_ssl_path = libs.path(b, "libssl.a").getPath(b);
+    const lib_crypto_path = libs.path(b, "libcrypto.a").getPath(b);
+
+    const include_exists = if (cwd.access(include_path, .{})) |_| true else |_| false;
+    const lib_ssl_exists = if (cwd.access(lib_ssl_path, .{})) |_| true else |_| false;
+    const lib_crypto_exists = if (cwd.access(lib_crypto_path, .{})) |_| true else |_| false;
+
+    const is_cached = include_exists and lib_ssl_exists and lib_crypto_exists;
+
+    if (is_cached) {
+        return prefix_cache;
+    }
+
     const cpus = std.Thread.getCpuCount() catch 1;
-    const openssl_sources = openssl.path("");
-    const openssl_configure_path = openssl.path("Configure").getPath(b);
-    const openssl_prefix_path = b.path(".zig-cache/openssl").getPath(b);
 
-    fs.deleteTreeAbsolute(openssl_prefix_path) catch {};
+    const openssl = b.dependency("openssl", .{});
+    const sources = openssl.path("");
+    const configure_path = openssl.path("Configure").getPath(b);
 
-    const openssl_configure_command = b.addSystemCommand(&.{
-        openssl_configure_path,
-        b.fmt("--prefix={s}", .{openssl_prefix_path}),
+    const configure_command = b.addSystemCommand(&.{
+        configure_path,
+        b.fmt("--prefix={s}", .{prefix_cache_path}),
         "-no-shared",
         "-no-acvp-tests",
         "-no-external-tests",
         "-no-tests",
         "-no-unit-test",
     });
-    setupExternalRun(openssl_configure_command, openssl_sources);
+    setupExternalRun(configure_command, sources);
 
-    const openssl_make_clean_command = b.addSystemCommand(&.{
+    const make_clean_command = b.addSystemCommand(&.{
         "make",
         "clean",
     });
-    setupExternalRun(openssl_make_clean_command, openssl_sources);
-    openssl_make_clean_command.step.dependOn(&openssl_configure_command.step);
+    setupExternalRun(make_clean_command, sources);
+    make_clean_command.step.dependOn(&configure_command.step);
 
-    const openssl_make_build_command = b.addSystemCommand(&.{
+    const make_build_command = b.addSystemCommand(&.{
         "make",
         b.fmt("-j{d}", .{cpus}),
         "build_generated",
         "libssl.a",
         "libcrypto.a",
     });
-    setupExternalRun(openssl_make_build_command, openssl_sources);
-    openssl_make_build_command.step.dependOn(&openssl_make_clean_command.step);
+    setupExternalRun(make_build_command, sources);
+    make_build_command.step.dependOn(&make_clean_command.step);
 
-    const openssl_make_install_command = b.addSystemCommand(&.{
+    const make_install_command = b.addSystemCommand(&.{
         "make",
         "install_dev",
     });
-    setupExternalRun(openssl_make_install_command, openssl_sources);
-    openssl_make_install_command.step.dependOn(&openssl_make_build_command.step);
+    setupExternalRun(make_install_command, sources);
+    make_install_command.step.dependOn(&make_build_command.step);
 
-    dependant.dependOn(&openssl_make_install_command.step);
+    const prefix_generated = b.allocator.create(Build.GeneratedFile) catch @panic("OOM");
+
+    prefix_generated.* = .{
+        .step = &make_install_command.step,
+        .path = prefix_cache.getPath(b),
+    };
+
+    return .{
+        .generated = .{
+            .file = prefix_generated,
+        }
+    };
 }
 
 pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const cwd = fs.cwd();
 
-    const openssl = b.dependency("openssl", .{
+    const lib_ssl = b.addStaticLibrary(.{
+        .name = "ssl",
         .target = target,
         .optimize = optimize,
     });
 
-    const openssl_prefix = b.path(".zig-cache/openssl");
-    const openssl_libs = openssl_prefix.path(b, "lib");
-    const openssl_include = openssl_prefix.path(b, "include");
+    const lib_crypto = b.addStaticLibrary(.{
+        .name = "crypto",
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const openssl_generated_prefix = buildOpenSSL(b);
+    const openssl_libs = openssl_generated_prefix.path(b, "lib");
+    const openssl_include = openssl_generated_prefix.path(b, "include");
     const openssl_lib_ssl = openssl_libs.path(b, "libssl.a");
     const openssl_lib_crypto = openssl_libs.path(b, "libcrypto.a");
-    const openssl_lib_ssl_exists = if (cwd.statFile(openssl_lib_ssl.getPath(b))) |_| true else |_| false;
-    const openssl_lib_crypto_exists = if (cwd.statFile(openssl_lib_crypto.getPath(b))) |_| true else |_| false;
 
-    if (!openssl_lib_ssl_exists or !openssl_lib_crypto_exists) {
-        buildOpenSSL(b, openssl, b.default_step);
-    }
+    lib_ssl.addObjectFile(openssl_lib_ssl);
+    lib_crypto.addObjectFile(openssl_lib_crypto);
 
-    _ = b.addModule("lib_ssl", .{ .root_source_file = openssl_lib_ssl, });
-    _ = b.addModule("lib_crypto", .{ .root_source_file = openssl_lib_crypto, });
-    _ = b.addModule("libs", .{ .root_source_file = openssl_libs, });
-    _ = b.addModule("includes", .{ .root_source_file = openssl_include, });
+    b.installArtifact(lib_ssl);
+    b.installArtifact(lib_crypto);
+
+    lib_ssl.installHeadersDirectory(openssl_include, ".", .{});
+    lib_crypto.installHeadersDirectory(openssl_include, ".", .{});
 }
