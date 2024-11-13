@@ -92,15 +92,15 @@ pub fn build(b: *Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const lib_ssl = b.addStaticLibrary(.{
-        .root_source_file = b.path("src/dummy.zig"),
         .name = "ssl",
+        .root_source_file = b.path("src/dummy.zig"),
         .target = target,
         .optimize = optimize,
     });
 
     const lib_crypto = b.addStaticLibrary(.{
-        .root_source_file = b.path("src/dummy.zig"),
         .name = "crypto",
+        .root_source_file = b.path("src/dummy.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -108,12 +108,11 @@ pub fn build(b: *Build) void {
     const openssl_generated_prefix = buildOpenSSL(b);
     const openssl_libs = openssl_generated_prefix.path(b, "lib");
     const openssl_include = openssl_generated_prefix.path(b, "include");
+    const openssl_lib_ssl = openssl_libs.path(b, "libssl.a");
+    const openssl_lib_crypto = openssl_libs.path(b, "libcrypto.a");
 
-    lib_ssl.addLibraryPath(openssl_libs);
-    lib_ssl.linkSystemLibrary("ssl");
-
-    lib_crypto.addLibraryPath(openssl_libs);
-    lib_crypto.linkSystemLibrary("crypto");
+    lib_ssl.addCSourceFile(.{.file = openssl_lib_ssl});
+    lib_crypto.addCSourceFile(.{.file = openssl_lib_crypto});
 
     b.installArtifact(lib_ssl);
     b.installArtifact(lib_crypto);
