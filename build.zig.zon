@@ -10,5 +10,6 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        "src/dummy.zig"
     },
 }
