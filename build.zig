@@ -110,10 +110,10 @@ pub fn build(b: *Build) void {
     const openssl_include = openssl_generated_prefix.path(b, "include");
 
     lib_ssl.addLibraryPath(openssl_libs);
-    lib_ssl.linkSystemLibrary2("ssl", .{.preferred_link_mode = .static});
+    lib_ssl.linkSystemLibrary("ssl");
 
     lib_crypto.addLibraryPath(openssl_libs);
-    lib_crypto.linkSystemLibrary2("crypto", .{.preferred_link_mode = .static});
+    lib_crypto.linkSystemLibrary("crypto");
 
     b.installArtifact(lib_ssl);
     b.installArtifact(lib_crypto);
