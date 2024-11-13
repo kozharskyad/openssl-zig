@@ -5,6 +5,7 @@ const fs = std.fs;
 
 fn setupExternalRun(run: *Build.Step.Run, cwd: LazyPath) void {
     run.setCwd(cwd);
+    run.setEnvironmentVariable("AR", "zig ar");
     run.setEnvironmentVariable("CC", "zig cc");
     run.setEnvironmentVariable("CXX", "zig c++");
 }
@@ -91,12 +92,14 @@ pub fn build(b: *Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const lib_ssl = b.addStaticLibrary(.{
+        .root_source_file = b.path("src/dummy.zig"),
         .name = "ssl",
         .target = target,
         .optimize = optimize,
     });
 
     const lib_crypto = b.addStaticLibrary(.{
+        .root_source_file = b.path("src/dummy.zig"),
         .name = "crypto",
         .target = target,
         .optimize = optimize,
@@ -105,11 +108,12 @@ pub fn build(b: *Build) void {
     const openssl_generated_prefix = buildOpenSSL(b);
     const openssl_libs = openssl_generated_prefix.path(b, "lib");
     const openssl_include = openssl_generated_prefix.path(b, "include");
-    const openssl_lib_ssl = openssl_libs.path(b, "libssl.a");
-    const openssl_lib_crypto = openssl_libs.path(b, "libcrypto.a");
 
-    lib_ssl.addObjectFile(openssl_lib_ssl);
-    lib_crypto.addObjectFile(openssl_lib_crypto);
+    lib_ssl.addLibraryPath(openssl_libs);
+    lib_ssl.linkSystemLibrary2("ssl", .{.preferred_link_mode = .static});
+
+    lib_crypto.addLibraryPath(openssl_libs);
+    lib_crypto.linkSystemLibrary2("crypto", .{.preferred_link_mode = .static});
 
     b.installArtifact(lib_ssl);
     b.installArtifact(lib_crypto);
